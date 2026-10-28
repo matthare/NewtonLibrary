@@ -7,7 +7,8 @@ struct DetailPane: View {
     var onRemove: () -> Void
 
     var body: some View {
-        let selected = store.items.filter { selection.contains($0.id) }
+        let selected = selection.count == 1 ? selection.compactMap(store.item)
+            : store.items.filter { selection.contains($0.id) }
         if selected.count == 1, let item = selected.first {
             PackageDetailView(store: store, item: item, onRemove: onRemove)
                 .id(item.id)

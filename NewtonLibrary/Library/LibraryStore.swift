@@ -7,10 +7,15 @@ import Foundation
 final class LibraryStore: ObservableObject {
     static let shared = LibraryStore()
 
-    @Published private(set) var items: [LibraryItem] = []
+    @Published private(set) var items: [LibraryItem] = [] {
+        // (what's worked out from them is worked out again when it's next wanted)
+        didSet { derived = Derived() }
+    }
     /// A short report on the last thing done (e.g. "Added 3 packages."), shown under the list.
     @Published var message: String?
     @Published private(set) var isBusy = false
+    /// While several files are being added: what the progress sheet shows.
+    @Published private(set) var addProgress: AddProgress?
     /// The packages selected in the list.
     @Published var selection = Set<Int64>()
     /// The sidebar choice and the search text.
@@ -24,7 +29,9 @@ final class LibraryStore: ObservableObject {
         didSet { UserDefaults.standard.set(runsOnTo, forKey: "RunsOnTo") }
     }
     /// Which packages belong together (see Relations).
-    @Published private(set) var relations = Relations()
+    @Published private(set) var relations = Relations() {
+        didSet { derived.addOns = nil }
+    }
     /// The package whose Info window is open, if any.
     @Published var infoWindow: InfoRequest?
     @Published private(set) var databaseError: String?
@@ -53,21 +60,118 @@ final class LibraryStore: ObservableObject {
     /// The publishers in the library (of packages whose files are there), grouped by key, each shown by its most
     /// common spelling.
     var publishers: [(key: String, name: String)] {
+        if let publishers = derived.publishers { return publishers }
         var spellings: [String: [String: Int]] = [:]
         for item in items where !item.isMissing {
             spellings[item.publisherKey, default: [:]][item.publisher, default: 0] += 1
         }
-        return spellings.map { key, names in
+        let publishers = spellings.map { key, names in
             (key: key, name: names.max { $0.value < $1.value || $0.value == $1.value && $0.key.count < $1.key.count }?.key ?? key)
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        derived.publishers = publishers
+        return publishers
     }
 
     /// The kinds you've named yourself, in alphabetical order.
     var customKinds: [String] {
-        Array(Set(items.compactMap(\.customKind)))
+        if let kinds = derived.customKinds { return kinds }
+        let kinds = Array(Set(items.compactMap(\.customKind)))
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        derived.customKinds = kinds
+        return kinds
     }
+
+    /// How many packages a sidebar choice shows. All of them are counted in one
+    /// go, and kept until the library changes: the sidebar asks again every
+    /// time anything changes, even the selection.
+    func count(_ filter: LibraryFilter) -> Int {
+        if case .runsOn(let from, let to) = filter {
+            let key = from + "\u{1F}" + to
+            if let count = derived.runsOn[key] { return count }
+            let count = items.filter(filter.includes).count
+            derived.runsOn[key] = count
+            return count
+        }
+        if derived.counts == nil {
+            var counts: [LibraryFilter: Int] = [:]
+            let recent = Date().addingTimeInterval(-LibraryFilter.recentDays * 24 * 60 * 60)
+            for item in items {
+                if item.isMissing {
+                    counts[.missing, default: 0] += 1
+                    continue
+                }
+                counts[.all, default: 0] += 1
+                if item.dateAdded > recent { counts[.recentlyAdded, default: 0] += 1 }
+                counts[.os(item.os), default: 0] += 1
+                counts[.kind(item.kindKey), default: 0] += 1
+                counts[.publisher(item.publisherKey), default: 0] += 1
+            }
+            derived.counts = counts
+        }
+        return derived.counts?[filter] ?? 0
+    }
+
+    /// The packages the list shows: those the sidebar choice and the search
+    /// include, sorted. Kept until any of those (or the library) changes, as the
+    /// list is drawn again for every click.
+    func visibleItems(sortedBy order: [KeyPathComparator<LibraryItem>]) -> [LibraryItem] {
+        if let visible = derived.visible, visible.filter == filter, visible.search == search, visible.order == order {
+            return visible.items
+        }
+        // The sidebar choice's packages, sorted, are kept too: searching only
+        // takes some of them away, keeping the order (sorting takes longer
+        // than searching, and the search changes with every letter typed)
+        let sorted: [LibraryItem]
+        if let all = derived.visible, all.filter == filter, all.search.isEmpty, all.order == order {
+            sorted = all.items
+        } else if let all = derived.sorted, all.filter == filter, all.order == order {
+            sorted = all.items
+        } else {
+            sorted = items.filter { filter.includes($0) }.sorted(using: order)
+        }
+        derived.sorted = Visible(filter: filter, search: "", order: order, items: sorted)
+        var shown = sorted
+        if !search.isEmpty {
+            // (each package's text is folded once, then kept until the library changes)
+            if derived.searchText == nil {
+                derived.searchText = Dictionary(items.map { ($0.id, $0.searchText) }, uniquingKeysWith: { a, _ in a })
+            }
+            let texts = derived.searchText!, wanted = LibraryItem.folded(search)
+            shown = sorted.filter { texts[$0.id]?.range(of: wanted, options: .literal) != nil }
+        }
+        derived.visible = Visible(filter: filter, search: search, order: order, items: shown)
+        return shown
+    }
+
+    private struct Visible {
+        var filter: LibraryFilter
+        var search: String
+        var order: [KeyPathComparator<LibraryItem>]
+        var items: [LibraryItem]
+    }
+
+    /// What's worked out from the items, kept until they change.
+    private struct Derived {
+        var visible: Visible?
+        /// The sidebar choice's packages, sorted, before searching.
+        var sorted: Visible?
+        var counts: [LibraryFilter: Int]?
+        var runsOn: [String: Int] = [:]
+        var publishers: [(key: String, name: String)]?
+        var customKinds: [String]?
+        /// Each item's place in `items`, by ID.
+        var index: [Int64: Int]?
+        /// Each package's add-ons (one step), from `relations`.
+        var addOns: [Int64: [Int64]]?
+        /// The links found in the packages themselves, without your choices.
+        var found: Relations?
+        /// Each package's text for searching, by ID.
+        var searchText: [Int64: String]?
+        /// Every package, by title (for the Info window's Main package menu).
+        var byTitle: [LibraryItem]?
+    }
+    private var derived = Derived()
 
     /// The window title for a sidebar choice.
     func title(for filter: LibraryFilter) -> String {
@@ -147,6 +251,7 @@ final class LibraryStore: ObservableObject {
     /// yourself (Main package in Get Info).
     func refreshRelations() {
         var r = Relations.compute(items)
+        derived.found = r
         let bySHA = Dictionary(items.map { ($0.sha256, $0.id) }, uniquingKeysWith: { a, _ in a })
         for item in items {
             guard let choice = item.mainPackageChoice else { continue }
@@ -166,8 +271,37 @@ final class LibraryStore: ObservableObject {
     }
 
     func addOns(of item: LibraryItem) -> [LibraryItem] {
-        relations.addOns(of: item.id).compactMap { self.item($0) }
+        addOnIDs(of: item.id).compactMap { self.item($0) }
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    /// The add-ons that belong to a package (one step). Worked out for all
+    /// packages at once: the list asks for every row each time it's drawn.
+    func addOnIDs(of id: Int64) -> [Int64] {
+        if derived.addOns == nil {
+            var addOns: [Int64: [Int64]] = [:]
+            for (addOn, main) in relations.main { addOns[main, default: []].append(addOn) }
+            for key in addOns.keys { addOns[key]!.sort() }
+            derived.addOns = addOns
+        }
+        return derived.addOns?[id] ?? []
+    }
+
+    /// The links found in the packages themselves, without the main packages
+    /// you chose in Get Info.
+    var foundRelations: Relations {
+        if let found = derived.found { return found }
+        let found = Relations.compute(items)
+        derived.found = found
+        return found
+    }
+
+    /// Every package, sorted by title.
+    var itemsByTitle: [LibraryItem] {
+        if let sorted = derived.byTitle { return sorted }
+        let sorted = items.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        derived.byTitle = sorted
+        return sorted
     }
 
     /// Selects a package in the list, showing all packages if it's filtered out.
@@ -187,6 +321,8 @@ final class LibraryStore: ObservableObject {
         var publisherFolders = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         let versions = versionsByPackage()
         var moved = 0
+        var newPaths: [Int64: String] = [:]
+        defer { setFilePaths(newPaths) }
         for item in items where ids.contains(item.id) && isInLibraryFolder(item) {
             let target = organizedFolder(for: item, publisherFolders: publisherFolders, versions: versions)
             let current = item.fileURL.deletingLastPathComponent()
@@ -194,10 +330,18 @@ final class LibraryStore: ObservableObject {
                   FileManager.default.fileExists(atPath: item.filePath) else { continue }
             do {
                 let destination = try Importer.move(item.fileURL, into: target, named: item.originalName)
-                setFilePath(item.id, destination.path)
+                newPaths[item.id] = destination.path
                 Importer.removeEmptyFolders(from: current, upTo: root)
                 moved += 1
-                publisherFolders = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+                // A publisher folder it made (listing the library folder again
+                // after every move was slow; a folder that's since gone is
+                // passed over, as organizedFolder checks it's there)
+                if destination.path.hasPrefix(root.path + "/"),
+                   let top = destination.path.dropFirst(root.path.count + 1).split(separator: "/").first.map(String.init) {
+                    if !publisherFolders.contains(top) { publisherFolders.append(top) }
+                } else {
+                    publisherFolders = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+                }
             } catch {
                 message = "Couldn't move \(item.originalName): \(error.localizedDescription)"
             }
@@ -209,9 +353,13 @@ final class LibraryStore: ObservableObject {
 
     /// Notes which packages' files can't be found (and which have come back).
     private func markMissing() {
-        for index in items.indices {
-            items[index].isMissing = !FileManager.default.fileExists(atPath: items[index].filePath)
+        // (changed in a copy, then put back once: changing `items` one package
+        // at a time copies the whole list each time)
+        var updated = items
+        for index in updated.indices {
+            updated[index].isMissing = !FileManager.default.fileExists(atPath: updated[index].filePath)
         }
+        items = updated
     }
 
     /// Removes the folders in the library folder that missing packages were in,
@@ -265,32 +413,89 @@ final class LibraryStore: ObservableObject {
 
     /// Adds package files (or every package in the given folders): reads each one,
     /// copies it into the library folder and adds it to the database.
+    /// Adding several at once (dropped together, or chosen together) shows a
+    /// progress sheet, whose Cancel button stops it.
     func add(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
+        // Files dropped while an add is going on are added after it
+        if adding != nil {
+            pendingAdds += urls
+            return
+        }
         let folder = libraryFolder
         // (A package whose file is missing can be added again: its new copy takes
         // the missing one's place)
         let known = Set(items.filter { !$0.isMissing }.map(\.sha256))
+        let showsProgress = urls.count > 1
+        let control = Importer.Control { [weak self] done, total, current in
+            guard let self, self.addProgress != nil else { return }
+            self.addProgress?.done = done
+            self.addProgress?.total = total
+            if !current.isEmpty { self.addProgress?.current = current }
+        }
+        adding = control
+        if showsProgress { addProgress = AddProgress() }
         isBusy = true
         message = "Adding packages…"
         Task.detached(priority: .userInitiated) {
-            let outcomes = Importer.importFiles(urls, into: folder, known: known)
-            await self.finishAdding(outcomes)
+            let outcomes = Importer.importFiles(urls, into: folder, known: known, control: control)
+            await self.finishAdding(outcomes, stopped: control.isCancelled)
         }
     }
 
-    private func finishAdding(_ outcomes: [Importer.Outcome]) {
+    /// The progress sheet's Cancel button: stops adding (the packages added so
+    /// far are kept), and forgets files dropped meanwhile.
+    func cancelAdding() {
+        adding?.cancel()
+        pendingAdds = []
+        addProgress?.stopping = true
+    }
+
+    /// Files opened from the Finder or dropped on the Dock icon arrive one by
+    /// one: those that come together are added together.
+    func open(_ url: URL) {
+        openedURLs.append(url)
+        guard openedURLs.count == 1 else { return }
+        DispatchQueue.main.async {
+            let urls = self.openedURLs
+            self.openedURLs = []
+            self.add(urls)
+        }
+    }
+
+    private var adding: Importer.Control?
+    private var pendingAdds: [URL] = []
+    private var openedURLs: [URL] = []
+
+    private func finishAdding(_ outcomes: [Importer.Outcome], stopped: Bool) {
+        inTransaction { finishAddingNow(outcomes, stopped: stopped) }
+    }
+
+    private func finishAddingNow(_ outcomes: [Importer.Outcome], stopped: Bool) {
+        adding = nil
+        let hadSheet = addProgress != nil
+        addProgress = nil
+        defer {
+            if !pendingAdds.isEmpty {
+                let next = pendingAdds
+                pendingAdds = []
+                add(next)
+            }
+        }
         var added: [LibraryItem] = []
+        var current = items     // (changed here, and put back once)
+        let idBySha = Dictionary(items.map { ($0.sha256, $0.id) }, uniquingKeysWith: { first, _ in first })
         var duplicates: Set<Int64> = [], found: Set<Int64> = [], notPackages: [String] = [], failures: [String] = []
         var archives: [(name: String, packages: Int)] = []
         for outcome in outcomes {
             switch outcome {
             case let .added(sha, path, name, info):
                 // The file of a missing package: it's back (with everything you'd set)
-                if let index = items.firstIndex(where: { $0.isMissing && $0.sha256 == sha }) {
-                    items[index].isMissing = false
-                    setFilePath(items[index].id, path)
-                    found.insert(items[index].id)
+                if let index = current.firstIndex(where: { $0.isMissing && $0.sha256 == sha }) {
+                    current[index].isMissing = false
+                    current[index].filePath = path
+                    do { try db?.updateFilePath(id: current[index].id, path) } catch { failures.append("\(name): \(error.localizedDescription)") }
+                    found.insert(current[index].id)
                     continue
                 }
                 do {
@@ -301,7 +506,7 @@ final class LibraryStore: ObservableObject {
                     failures.append("\(name): \(error.localizedDescription)")
                 }
             case .duplicate(_, let sha):
-                if let existing = items.first(where: { $0.sha256 == sha }) { duplicates.insert(existing.id) }
+                if let existing = idBySha[sha] { duplicates.insert(existing) }
                 else if let new = added.first(where: { $0.sha256 == sha }) { duplicates.insert(new.id) }
             case let .archive(name, count):
                 archives.append((name, count))
@@ -311,7 +516,7 @@ final class LibraryStore: ObservableObject {
                 failures.append("\(name): \(why)")
             }
         }
-        items += added
+        items = current + added
         // New packages may be add-ons for ones already here, or the main package
         // for add-ons already here: work out the links and file everything
         refreshRelations()
@@ -324,10 +529,15 @@ final class LibraryStore: ObservableObject {
         isBusy = false
         // A single package (new or already there) opens in the Info window
         if chosen.count == 1, let id = chosen.first, failures.isEmpty {
-            infoWindow = InfoRequest(id: id)
+            if hadSheet {
+                // (once the progress sheet has gone: one sheet can't replace another at once)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.infoWindow = InfoRequest(id: id) }
+            } else {
+                infoWindow = InfoRequest(id: id)
+            }
         }
 
-        var report: [String] = []
+        var report: [String] = stopped ? ["Stopped."] : []
         let opened = archives.filter { $0.packages > 0 }, empty = archives.filter { $0.packages == 0 }
         if !opened.isEmpty {
             let count = opened.map(\.packages).reduce(0, +)
@@ -368,7 +578,10 @@ final class LibraryStore: ObservableObject {
     }
 
     func item(_ id: Int64) -> LibraryItem? {
-        items.first { $0.id == id }
+        if derived.index == nil {
+            derived.index = Dictionary(items.indices.map { (items[$0].id, $0) }, uniquingKeysWith: { a, _ in a })
+        }
+        return derived.index?[id].map { items[$0] }
     }
 
     /// Saves what was changed in the Info window.
@@ -388,39 +601,59 @@ final class LibraryStore: ObservableObject {
     /// Changes several packages and saves them, then works out the links again
     /// and moves files whose folder has changed.
     func updateAll(_ ids: Set<Int64>, _ change: (inout LibraryItem) -> Void) {
+        inTransaction { updateAllNow(ids, change) }
+    }
+
+    private func updateAllNow(_ ids: Set<Int64>, _ change: (inout LibraryItem) -> Void) {
         var changed = false
-        for index in items.indices where ids.contains(items[index].id) {
-            var item = items[index]
+        var updated = items     // (changed here, and put back once)
+        for index in updated.indices where ids.contains(updated[index].id) {
+            var item = updated[index]
             change(&item)
-            guard item != items[index] else { continue }
+            guard item != updated[index] else { continue }
             do {
                 try db?.update(item)
-                items[index] = item
+                updated[index] = item
                 changed = true
             } catch {
                 message = error.localizedDescription
             }
         }
         guard changed else { return }
+        items = updated
         refreshRelations()
         organize(Set(items.map(\.id)))
     }
 
-    /// Records where a package's file now is (without moving anything).
-    private func setFilePath(_ id: Int64, _ path: String) {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-        var item = items[index]
-        item.filePath = path
-        do {
-            try db?.update(item)
-            items[index] = item
-        } catch {
-            message = error.localizedDescription
+    /// Runs `body` as one database transaction (see LibraryDatabase.transaction).
+    private func inTransaction(_ body: () -> Void) {
+        if let db { db.transaction(body) } else { body() }
+    }
+
+    /// Records where packages' files now are (without moving anything).
+    private func setFilePaths(_ paths: [Int64: String]) {
+        guard !paths.isEmpty else { return }
+        var updated = items     // (changed here, and put back once)
+        inTransaction {
+            for index in updated.indices {
+                guard let path = paths[updated[index].id] else { continue }
+                do {
+                    try db?.updateFilePath(id: updated[index].id, path)
+                    updated[index].filePath = path
+                } catch {
+                    message = error.localizedDescription
+                }
+            }
         }
+        items = updated
     }
 
     /// Removes packages from the library, and moves their files to the Trash if asked.
     func remove(_ ids: Set<Int64>, moveFilesToTrash: Bool) {
+        inTransaction { removeNow(ids, moveFilesToTrash: moveFilesToTrash) }
+    }
+
+    private func removeNow(_ ids: Set<Int64>, moveFilesToTrash: Bool) {
         var removed = 0
         var emptiedFolders: Set<URL> = []
         for item in items where ids.contains(item.id) {
@@ -475,17 +708,13 @@ final class LibraryStore: ObservableObject {
         isBusy = true
         message = "Re-reading packages…"
         Task.detached(priority: .userInitiated) {
-            var fresh: [Int64: PackageInfo] = [:]
-            var missing = 0
-            for item in snapshot {
-                guard let data = try? Data(contentsOf: item.fileURL),
-                      let info = try? PackageReader.inspect(data, fileName: item.originalName) else {
-                    missing += 1
-                    continue
-                }
-                fresh[item.id] = info
+            // (several at once: reading a package takes a while, mostly telling its language)
+            let infos = Importer.concurrentMap(snapshot) { item in
+                (try? Data(contentsOf: item.fileURL)).flatMap { try? PackageReader.inspect($0, fileName: item.originalName) }
             }
-            await self.finishRereading(fresh, missing: missing)
+            var fresh: [Int64: PackageInfo] = [:]
+            for (item, info) in zip(snapshot, infos) { fresh[item.id] = info }
+            await self.finishRereading(fresh, missing: snapshot.count - fresh.count)
         }
     }
 
@@ -526,9 +755,7 @@ final class LibraryStore: ObservableObject {
     }
 
     private func finishCopying(_ moved: [Int64: String], failed: Int) {
-        for (id, path) in moved {
-            setFilePath(id, path)
-        }
+        setFilePaths(moved)
         organize(Set(moved.keys))
         isBusy = false
         message = "Copied \(moved.count) package\(moved.count == 1 ? "" : "s") into the library folder."
@@ -553,6 +780,15 @@ struct InfoRequest: Identifiable {
     let id: Int64
 }
 
+/// How far adding has got: files looked at, of those known about so far.
+struct AddProgress: Equatable {
+    var done = 0, total = 0
+    /// The file being read.
+    var current = ""
+    /// Cancel has been clicked; it stops before the next file.
+    var stopping = false
+}
+
 // MARK: - Importing
 
 /// The file work for adding packages, done off the main thread.
@@ -569,12 +805,50 @@ enum Importer {
     /// Newton packages are small; anything bigger than this isn't one.
     static let maximumSize = 64 * 1024 * 1024
 
+    /// How an import tells the app how far it's got, and learns that it should stop.
+    /// Used from the import's thread and the main thread.
+    final class Control: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+        private var lastReport = Date.distantPast
+        private let onProgress: @MainActor @Sendable (_ done: Int, _ total: Int, _ current: String) -> Void
+
+        /// `onProgress` is called on the main thread, a few times a second at most.
+        init(onProgress: @escaping @MainActor @Sendable (_ done: Int, _ total: Int, _ current: String) -> Void) {
+            self.onProgress = onProgress
+        }
+
+        var isCancelled: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return cancelled
+        }
+
+        /// Stops the import before its next file; what it has added so far is kept.
+        func cancel() {
+            lock.lock(); cancelled = true; lock.unlock()
+        }
+
+        func report(done: Int, total: Int, current: String, force: Bool = false) {
+            lock.lock()
+            let now = Date()
+            let due = force || now.timeIntervalSince(lastReport) > 0.1
+            if due { lastReport = now }
+            lock.unlock()
+            guard due else { return }
+            let onProgress = self.onProgress
+            Task { @MainActor in onProgress(done, total, current) }
+        }
+    }
+
     /// Reads each file (and every file in the folders given), copying the
     /// packages into the library folder. Archives are opened, and the packages
     /// inside them added the same way.
-    static func importFiles(_ urls: [URL], into folder: URL, known: Set<String>) -> [Outcome] {
+    static func importFiles(_ urls: [URL], into folder: URL, known: Set<String>, control: Control? = nil) -> [Outcome] {
         var seen = known
         var outcomes: [Outcome] = []
+        // For the progress sheet: files looked at, of all those known about so far
+        // (an archive's contents count once it's opened)
+        var done = 0, total = 0
         // Archives are unpacked here, and it's all thrown away at the end
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("Newton Library \(UUID().uuidString)", isDirectory: true)
@@ -584,35 +858,75 @@ enum Importer {
         /// `inArchive`: inside an archive, where files that aren't packages
         /// (read-mes and so on) are passed over without a word.
         func look(at files: [URL], inArchive: Bool, depth: Int) {
-            for file in files {
-                let name = file.lastPathComponent
-                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                let data = size <= maximumSize ? try? Data(contentsOf: file) : nil
-                guard let package = data.flatMap(PackageReader.package(in:)) else {
-                    if let format = Archives.format(of: file), depth < Archives.maximumDepth {
-                        openArchive(file, format: format, inArchive: inArchive, depth: depth)
-                    } else if !inArchive {
-                        outcomes.append(size > maximumSize || data != nil ? .notPackage(name)
-                                        : .failed(name, "it couldn't be read."))
-                    }
-                    continue
+            total += files.count
+            // Files are read several at a time (reading a package takes a while,
+            // mostly telling its language), then added one by one, in order
+            let batchSize = max(4, ProcessInfo.processInfo.activeProcessorCount * 2)
+            var start = 0
+            while start < files.count {
+                if control?.isCancelled == true { return }
+                let batch = Array(files[start..<min(start + batchSize, files.count)])
+                start += batch.count
+                let reads = read(batch, skipping: seen, done: done, total: total)
+                for (file, read) in zip(batch, reads) {
+                    if control?.isCancelled == true { return }
+                    defer { done += 1 }
+                    add(file, read, inArchive: inArchive, depth: depth)
                 }
-                packagesFound += 1
+            }
+        }
+
+        /// Reads files at the same time, telling the progress sheet about each.
+        func read(_ files: [URL], skipping known: Set<String>, done: Int, total: Int) -> [Read] {
+            let lock = NSLock()
+            var started = 0
+            return concurrentMap(files) { file in
+                if control?.isCancelled == true { return Read() }
+                lock.lock()
+                let position = done + started
+                started += 1
+                lock.unlock()
+                control?.report(done: position, total: total, current: file.lastPathComponent)
+                var read = Read()
+                read.size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let data = read.size <= maximumSize ? try? Data(contentsOf: file) : nil
+                read.couldRead = data != nil
+                guard let package = data.flatMap(PackageReader.package(in:)) else { return read }
                 let sha = sha256(package)
-                guard !seen.contains(sha) else {
-                    outcomes.append(.duplicate(name, sha256: sha))
-                    continue
+                read.package = (package, sha)
+                // (a package that's already in the library isn't read)
+                if !known.contains(sha) {
+                    read.info = Result { try PackageReader.inspect(package, fileName: file.lastPathComponent) }
                 }
-                do {
-                    let info = try PackageReader.inspect(package, fileName: name)
-                    let target = organizedFolder(root: folder, publisher: info.publisher ?? "",
-                                                 kind: info.kind.label, title: info.title)
-                    let copy = try self.copy(file, named: name, sha256: sha, into: target, libraryRoot: folder)
-                    seen.insert(sha)
-                    outcomes.append(.added(sha256: sha, path: copy.path, originalName: name, info: info))
-                } catch {
-                    outcomes.append(.failed(name, error.localizedDescription))
+                return read
+            }
+        }
+
+        func add(_ file: URL, _ read: Read, inArchive: Bool, depth: Int) {
+            let name = file.lastPathComponent
+            guard let (package, sha) = read.package else {
+                if let format = Archives.format(of: file), depth < Archives.maximumDepth {
+                    openArchive(file, format: format, inArchive: inArchive, depth: depth)
+                } else if !inArchive {
+                    outcomes.append(read.size > maximumSize || read.couldRead ? .notPackage(name)
+                                    : .failed(name, "it couldn't be read."))
                 }
+                return
+            }
+            packagesFound += 1
+            guard !seen.contains(sha) else {
+                outcomes.append(.duplicate(name, sha256: sha))
+                return
+            }
+            do {
+                let info = try (read.info ?? Result { try PackageReader.inspect(package, fileName: name) }).get()
+                let target = organizedFolder(root: folder, publisher: info.publisher ?? "",
+                                             kind: info.kind.label, title: info.title)
+                let copy = try self.copy(file, named: name, sha256: sha, into: target, libraryRoot: folder)
+                seen.insert(sha)
+                outcomes.append(.added(sha256: sha, path: copy.path, originalName: name, info: info))
+            } catch {
+                outcomes.append(.failed(name, error.localizedDescription))
             }
         }
 
@@ -638,7 +952,31 @@ enum Importer {
         }
 
         look(at: expand(urls), inArchive: false, depth: 0)
+        control?.report(done: done, total: total, current: "", force: true)
         return outcomes
+    }
+
+    /// What reading a file found.
+    private struct Read {
+        var size = 0
+        var couldRead = false
+        /// The package in it (without any MacBinary wrapping), and its SHA-256.
+        var package: (data: Data, sha256: String)?
+        /// What it says, unless it's already in the library.
+        var info: Result<PackageInfo, Error>?
+    }
+
+    /// `transform` applied to each of `items`, several at a time, in order.
+    static func concurrentMap<T, U>(_ items: [T], _ transform: (T) -> U) -> [U] {
+        var results = [U?](repeating: nil, count: items.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: items.count) { i in
+            let result = transform(items[i])
+            lock.lock()
+            results[i] = result
+            lock.unlock()
+        }
+        return results.map { $0! }
     }
 
     /// The files to look at: the files given, plus everything inside the folders given.
@@ -704,11 +1042,12 @@ enum Importer {
     }
 
     /// A free name for a file in a folder: its own name, or with " 2", " 3"... added.
-    private static func candidates(for name: String) -> [String] {
+    /// (Made one at a time, as they're tried: the first is almost always free.)
+    private static func candidates(for name: String) -> LazyMapSequence<ClosedRange<Int>, String> {
         let safeName = name.replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: "/", with: "-")
         let base = (safeName as NSString).deletingPathExtension
         let ext = (safeName as NSString).pathExtension
-        return (1...9999).map { n in n == 1 ? safeName : "\(base) \(n)" + (ext.isEmpty ? "" : ".\(ext)") }
+        return (1...9999).lazy.map { n in n == 1 ? safeName : "\(base) \(n)" + (ext.isEmpty ? "" : ".\(ext)") }
     }
 
     /// Copies a package into a folder under its own name, adding " 2", " 3"...

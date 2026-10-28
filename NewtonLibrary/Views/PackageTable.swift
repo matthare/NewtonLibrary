@@ -51,7 +51,7 @@ struct PackageTable: View {
         }
         .onDeleteCommand(perform: onDelete)
         // Drag rows out to the Finder and other apps
-        .background(TableDragSupport(files: items.map(\.fileURL)))
+        .background(TableDragSupport(items: items))
     }
 
     // Cells (kept out of the table, which is otherwise too much for the compiler)

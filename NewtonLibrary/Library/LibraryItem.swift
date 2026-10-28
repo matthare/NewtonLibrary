@@ -87,6 +87,12 @@ struct LibraryItem: Identifiable, Hashable {
     /// What you typed as a kind, as it's stored: a built-in kind's name
     /// ("book", "Books") becomes that kind, anything else stays as typed.
     static func kindKey(for typed: String) -> String {
+        kindKeys.value(for: typed) { makeKindKey(typed) }
+    }
+
+    private static let kindKeys = Memo<String, String>()
+
+    private static func makeKindKey(_ typed: String) -> String {
         let name = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         for kind in PackageKind.allCases {
             for match in [kind.rawValue, kind.label, kind.pluralLabel]
@@ -150,6 +156,13 @@ struct LibraryItem: Identifiable, Hashable {
     var publisherKey: String { LibraryItem.publisherKey(publisher) }
 
     static func publisherKey(_ name: String) -> String {
+        // (worked out once per name: the sidebar asks for thousands)
+        publisherKeys.value(for: name) { makePublisherKey(name) }
+    }
+
+    private static let publisherKeys = Memo<String, String>()
+
+    private static func makePublisherKey(_ name: String) -> String {
         let endings: Set<String> = ["inc", "llc", "ltd", "corp", "corporation", "co", "gmbh", "incorporated"]
         var words = name.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -173,9 +186,21 @@ struct LibraryItem: Identifiable, Hashable {
     }
 
     func matches(_ search: String) -> Bool {
-        let fields = [title, publisher, value(.packageName), originalName, value(.copyright), notes,
-                      value(.extrasName), author, language]
-        return fields.contains { $0.range(of: search, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        searchText.range(of: Self.folded(search), options: .literal) != nil
+    }
+
+    /// The text search looks through (titles, developers, package and file
+    /// names, copyrights, notes, Extras names, authors and languages), one
+    /// field to a line, folded with `folded`.
+    var searchText: String {
+        Self.folded([title, publisher, value(.packageName), originalName, value(.copyright), notes,
+                     value(.extrasName), author, language].joined(separator: "\n"))
+    }
+
+    /// Text without case or accents, for searching: search text folded the same
+    /// way is then found by a plain comparison.
+    static func folded(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 }
 
@@ -193,13 +218,16 @@ enum LibraryFilter: Hashable {
     /// Packages whose files can't be found (listed only here)
     case missing
 
+    /// Recently Added: packages added in this many days.
+    static let recentDays: Double = 30
+
     func includes(_ item: LibraryItem) -> Bool {
         if self == .missing { return item.isMissing }
         if item.isMissing { return false }
         switch self {
         case .missing: return true
         case .all: return true
-        case .recentlyAdded: return item.dateAdded > Date().addingTimeInterval(-30 * 24 * 60 * 60)
+        case .recentlyAdded: return item.dateAdded > Date().addingTimeInterval(-LibraryFilter.recentDays * 24 * 60 * 60)
         case .os(let os): return item.os == os
         case .runsOn(let from, let to): return item.runsOn(from: from, to: to)
         case .kind(let key): return item.kindKey == key
@@ -232,5 +260,25 @@ enum LibraryFilter: Hashable {
         case .publisher(let key): return key.isEmpty ? "No Developer" : key
         case .missing: return "Missing Files"
         }
+    }
+}
+
+/// Results kept by key, safe to use from any thread.
+final class Memo<Key: Hashable, Value>: @unchecked Sendable {
+    private var values: [Key: Value] = [:]
+    private let lock = NSLock()
+
+    func value(for key: Key, _ make: () -> Value) -> Value {
+        lock.lock()
+        if let value = values[key] {
+            lock.unlock()
+            return value
+        }
+        lock.unlock()
+        let value = make()
+        lock.lock()
+        values[key] = value
+        lock.unlock()
+        return value
     }
 }

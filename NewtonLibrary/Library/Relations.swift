@@ -118,9 +118,11 @@ struct Relations {
             return !name.isEmpty && name == b.value(.packageName).lowercased() && a.info.kind == b.info.kind
         }
         /// A package's signature: the last part ("Extras:SoloDx:Tactile" -> "tactile").
-        func signature(_ item: LibraryItem) -> String {
-            String(item.value(.signature).lowercased().split(separator: ":").last ?? "")
-        }
+        /// (Worked out once for each: it's compared for every add-on with every app.)
+        let signatures = Dictionary(uniqueKeysWithValues: items.map {
+            ($0.id, String($0.value(.signature).lowercased().split(separator: ":").last ?? ""))
+        })
+        func signature(_ item: LibraryItem) -> String { signatures[item.id] ?? "" }
         /// The developer part of a registered name: "addedsounds:allan" -> "allan".
         func nameSignature(_ name: String) -> String { String(name.split(separator: ":").last ?? "") }
 
@@ -152,7 +154,8 @@ struct Relations {
                 neighbours[b, default: []].insert(a)
             }
         }
-        func isApp(_ id: Int64) -> Bool { byID[id]?.kind.isApplication == true || byID[id]?.info.kind.isApplication == true }
+        let appIDs = Set(items.filter { $0.kind.isApplication || $0.info.kind.isApplication }.map(\.id))
+        func isApp(_ id: Int64) -> Bool { appIDs.contains(id) }
         /// Which of two linked packages is the main one.
         func mainOf(_ a: Int64, _ b: Int64) -> Int64 {
             if isApp(a) != isApp(b) { return isApp(a) ? a : b }
@@ -243,9 +246,10 @@ struct Relations {
         }
 
         // Probable links, for add-ons without a strong one
-        func nameBase(_ item: LibraryItem) -> String {
-            String(item.value(.packageName).split(separator: ":").first ?? "").lowercased()
-        }
+        let nameBases = Dictionary(uniqueKeysWithValues: items.map {
+            ($0.id, String($0.value(.packageName).split(separator: ":").first ?? "").lowercased())
+        })
+        func nameBase(_ item: LibraryItem) -> String { nameBases[item.id] ?? "" }
         var holders: [String: [Int64]] = [:]
         for item in items {
             for name in Set((item.info.registeredNames ?? []).map { $0.lowercased() }) {

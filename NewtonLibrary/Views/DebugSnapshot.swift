@@ -21,6 +21,19 @@ enum DebugSnapshot {
                 sidebar.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             }
         }
+        // -DebugAdd <folder> adds each file in it, as if they'd been dropped together;
+        // -DebugCancelAfter <seconds> then clicks the progress sheet's Cancel
+        if let folder = UserDefaults.standard.string(forKey: "DebugAdd") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                let urls = ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).sorted()
+                    .map { URL(fileURLWithPath: folder).appendingPathComponent($0) }
+                LibraryStore.shared.add(urls)
+                let after = UserDefaults.standard.double(forKey: "DebugCancelAfter")
+                if after > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + after) { LibraryStore.shared.cancelAdding() }
+                }
+            }
+        }
         // -DebugSelect <title> selects that package
         if let title = UserDefaults.standard.string(forKey: "DebugSelect") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {

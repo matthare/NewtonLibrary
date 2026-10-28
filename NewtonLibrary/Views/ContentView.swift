@@ -10,9 +10,7 @@ struct ContentView: View {
     @State private var expanded: Set<Int64> = []
 
     private var visibleItems: [LibraryItem] {
-        let filtered = store.items.filter { store.filter.includes($0) }
-        let searched = store.search.isEmpty ? filtered : filtered.filter { $0.matches(store.search) }
-        return searched.sorted(using: sortOrder)
+        store.visibleItems(sortedBy: sortOrder)
     }
 
     /// Whether the list shows packages with their add-ons under them: for a
@@ -62,7 +60,7 @@ struct ContentView: View {
         if let title = UserDefaults.standard.string(forKey: "DebugExpand") {
             let mains = store.items.filter { $0.title == title }
             expanded.formUnion(mains.map(\.id))
-            store.selection = Set(mains.flatMap { [$0.id] + store.relations.addOns(of: $0.id) })
+            store.selection = Set(mains.flatMap { [$0.id] + store.addOnIDs(of: $0.id) })
         }
         #endif
     }
@@ -73,7 +71,7 @@ struct ContentView: View {
             expanded.remove(item.id)
             var hidden: [Int64] = [], queue = [item.id]
             while let id = queue.popLast() {
-                let children = store.relations.addOns(of: id)
+                let children = store.addOnIDs(of: id)
                 hidden += children
                 queue += children
             }
@@ -162,6 +160,10 @@ struct ContentView: View {
             }
             Divider()
             statusBar(items)
+        }
+        // (on the list, not beside the Info window's sheet: one view can't reliably have two)
+        .sheet(isPresented: Binding(get: { store.addProgress != nil }, set: { _ in })) {
+            AddProgressSheet(store: store)
         }
     }
 
@@ -265,5 +267,35 @@ struct ContentView: View {
 
     private func toggleSidebar() {
         NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
+    }
+}
+
+/// While several files are being added: how far it's got, and a Cancel button.
+struct AddProgressSheet: View {
+    @ObservedObject var store: LibraryStore
+
+    var body: some View {
+        let progress = store.addProgress ?? AddProgress()
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Adding packages to the library")
+                .font(.headline)
+            Text(progress.stopping ? "Stopping…"
+                 : progress.current.isEmpty ? "Looking for packages…" : "Reading \(progress.current)")
+                .lineLimit(1)
+                .truncationMode(.middle)
+            ProgressView(value: Double(min(progress.done, progress.total)), total: Double(max(progress.total, 1)))
+            HStack {
+                Text(progress.total > 0 ? "\(progress.done) of \(progress.total)" : " ")
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+                Spacer()
+                Button("Cancel", action: store.cancelAdding)
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(progress.stopping)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+        .interactiveDismissDisabled()
     }
 }

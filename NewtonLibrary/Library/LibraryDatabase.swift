@@ -118,9 +118,31 @@ final class LibraryDatabase {
              String(decoding: try encoder.encode(item.edits), as: UTF8.self), item.notes, item.id])
     }
 
+    /// Records where a package's file now is (quicker than `update`, which
+    /// writes everything).
+    func updateFilePath(id: Int64, _ path: String) throws {
+        try run("UPDATE packages SET file_path = ? WHERE id = ?", [path, id])
+    }
+
     func delete(id: Int64) throws {
         try run("DELETE FROM packages WHERE id = ?", [id])
     }
+
+    /// Runs `body` as one transaction, so its changes are written to disk
+    /// together rather than one at a time (thousands of packages took
+    /// minutes). Called inside another, it's part of that one. Whatever was
+    /// done is kept even if `body` throws, as it would be without a transaction.
+    func transaction<T>(_ body: () throws -> T) rethrows -> T {
+        let outermost = transactionDepth == 0
+        if outermost { try? execute("BEGIN") }
+        transactionDepth += 1
+        defer {
+            transactionDepth -= 1
+            if outermost { try? execute("COMMIT") }
+        }
+        return try body()
+    }
+    private var transactionDepth = 0
 
     // MARK: SQLite helpers
 

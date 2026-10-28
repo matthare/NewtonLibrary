@@ -9,8 +9,9 @@ import SwiftUI
 /// row's file, passing everything else on to SwiftUI's own data source.
 /// Drags back onto Newton Library itself are refused, so nothing is re-added.
 struct TableDragSupport: NSViewRepresentable {
-    /// The package file for each row, in the order the list shows them.
-    let files: [URL?]
+    /// The packages, in the order the list shows them (their files are looked
+    /// up only when one is dragged: the list can have thousands).
+    let items: [LibraryItem]
 
     func makeCoordinator() -> DragDataSource { DragDataSource() }
 
@@ -18,7 +19,7 @@ struct TableDragSupport: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         let source = context.coordinator
-        source.files = files
+        source.items = items
         // Once the view is in the window (and again if SwiftUI replaces its data source)
         DispatchQueue.main.async {
             guard let table = Self.findTable(near: view) else { return }
@@ -93,15 +94,16 @@ struct TableDragSupport: NSViewRepresentable {
 
 final class DragDataSource: NSObject, NSTableViewDataSource, NSOutlineViewDataSource {
     weak var original: NSTableViewDataSource?
-    var files: [URL?] = []
+    var items: [LibraryItem] = []
     #if DEBUG
     static var debugLog: [String] = []
     #endif
 
     /// Each dragged row's file, if it's there.
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-        guard row >= 0, row < files.count, let url = files[row],
-              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard row >= 0, row < items.count else { return nil }
+        let url = items[row].fileURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         #if DEBUG
         DragDataSource.debugLog.append("drag row \(row): \(url.lastPathComponent)")
         #endif

@@ -107,7 +107,7 @@ struct SidebarView: View {
     }
 
     private func count(_ choice: LibraryFilter) -> Int {
-        store.items.filter(choice.includes).count
+        store.count(choice)
     }
 
     private func symbol(for os: NewtonOS) -> String {

@@ -156,10 +156,6 @@ struct InfoWindow: View {
     }
 
     private var related: some View {
-        let found = Relations.compute(store.items)
-        let foundMain = found.main[item.id].flatMap { store.item($0) }
-        let others = store.items.filter { $0.id != item.id }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         let addOns = store.addOns(of: item)
         let needs = store.relations.needs[item.id] ?? []
         return FormSection(title: "Related Packages") {
@@ -167,16 +163,11 @@ struct InfoWindow: View {
                 Text("Main package")
                     .foregroundColor(.secondary)
                     .frame(width: 100, alignment: .trailing)
-                Picker("", selection: $mainChoice) {
-                    Text("Automatic (\(foundMain.map { $0.title } ?? "none found"))").tag(Self.automaticMain)
-                    Text("None: it stands alone").tag("")
-                    Divider()
-                    ForEach(others) { other in
-                        Text(other.title).tag(other.sha256)
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: 320)
+                // (its own view, so typing in the other fields doesn't build
+                // its menu of every package again)
+                MainPackageMenu(store: store, item: item, choice: $mainChoice, automatic: Self.automaticMain)
+                    .equatable()
+                    .frame(maxWidth: 320)
                 Spacer(minLength: 0)
                 Button {
                     mainChoice = Self.automaticMain
@@ -409,5 +400,30 @@ private struct FormSection<Content: View>: View {
             Divider()
             content
         }
+    }
+}
+
+/// The Info window's Main package menu: automatic, none, or any package.
+private struct MainPackageMenu: View, Equatable {
+    @ObservedObject var store: LibraryStore
+    let item: LibraryItem
+    @Binding var choice: String
+    let automatic: String
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.item.id == b.item.id && a.choice == b.choice
+    }
+
+    var body: some View {
+        let foundMain = store.foundRelations.main[item.id].flatMap { store.item($0) }
+        Picker("", selection: $choice) {
+            Text("Automatic (\(foundMain.map { $0.title } ?? "none found"))").tag(automatic)
+            Text("None: it stands alone").tag("")
+            Divider()
+            ForEach(store.itemsByTitle.filter { $0.id != item.id }) { other in
+                Text(other.title).tag(other.sha256)
+            }
+        }
+        .labelsHidden()
     }
 }

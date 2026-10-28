@@ -24,7 +24,7 @@ struct NewtonLibraryApp: App {
                 // Packages dropped on the Dock icon, or opened with Newton Library from
                 // the Finder, are added to the library in this window (no new windows)
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
-                .onOpenURL { url in store.add([url]) }
+                .onOpenURL { url in store.open(url) }
                 .background(WindowMemory(firstSize: NSSize(width: 1280, height: 720)))
         }
         .commands {
