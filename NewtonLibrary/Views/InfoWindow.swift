@@ -14,9 +14,9 @@ struct InfoWindow: View {
     @State private var notes: String
     /// Typing the name of a new kind
     @State private var namingKind = false
-    /// The Main package menu: automatic, "" for none, or a package's SHA-256
-    @State private var mainChoice: String
-    private static let automaticMain = "\u{1}automatic"
+    /// The main package (saved with the rest)
+    @State private var mainChoice: MainPackageChoice
+    @State private var choosingMain = false
     private static let newKindTag = "\u{1}new kind"
 
     init(store: LibraryStore, item: LibraryItem) {
@@ -27,7 +27,7 @@ struct InfoWindow: View {
         values[.kind] = item.kindKey   // a kind typed as "Game" is the built-in Game kind
         _values = State(initialValue: values)
         _notes = State(initialValue: item.notes)
-        _mainChoice = State(initialValue: item.mainPackageChoice ?? Self.automaticMain)
+        _mainChoice = State(initialValue: MainPackageChoice(stored: item.mainPackageChoice))
     }
 
     private var info: PackageInfo { item.info }
@@ -163,21 +163,21 @@ struct InfoWindow: View {
                 Text("Main package")
                     .foregroundColor(.secondary)
                     .frame(width: 100, alignment: .trailing)
-                // (its own view, so typing in the other fields doesn't build
-                // its menu of every package again)
-                MainPackageMenu(store: store, item: item, choice: $mainChoice, automatic: Self.automaticMain)
-                    .equatable()
-                    .frame(maxWidth: 320)
+                Text(mainChoiceLabel)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Button("Choose…") { choosingMain = true }
+                    .help("Search the library for the package this one is an add-on for")
                 Spacer(minLength: 0)
                 Button {
-                    mainChoice = Self.automaticMain
+                    mainChoice = .automatic
                 } label: {
                     Image(systemName: "arrow.uturn.backward.circle")
                 }
                 .buttonStyle(.borderless)
                 .help("Work out the main package from the package itself")
-                .opacity(mainChoice == Self.automaticMain ? 0 : 1)
-                .disabled(mainChoice == Self.automaticMain)
+                .opacity(mainChoice == .automatic ? 0 : 1)
+                .disabled(mainChoice == .automatic)
                 .frame(width: 18)
             }
             Text("An add-on is listed with its main package and stored in the same folder.")
@@ -190,6 +190,21 @@ struct InfoWindow: View {
             ForEach(needs, id: \.self) { name in
                 fixedRow("Needs", "\(name), which isn't in your library")
             }
+        }
+        .sheet(isPresented: $choosingMain) {
+            MainPackageChooser(store: store, packages: [item], current: mainChoice) { mainChoice = $0 }
+        }
+    }
+
+    private var mainChoiceLabel: String {
+        switch mainChoice {
+        case .automatic:
+            let found = store.foundRelations.main[item.id].flatMap { store.item($0) }
+            return "Automatic (\(found?.title ?? "none found"))"
+        case .none:
+            return "None: it stands alone"
+        case .package(let sha):
+            return store.item(withSHA256: sha)?.title ?? "A package no longer in the library"
         }
     }
 
@@ -253,10 +268,10 @@ struct InfoWindow: View {
             Button("Use Package Values") {
                 for field in InfoField.allCases { values[field] = item.detected(field) }
                 namingKind = false
-                mainChoice = Self.automaticMain
+                mainChoice = .automatic
             }
             .help("Put back everything as it was read from the package (your notes are kept)")
-            .disabled(InfoField.allCases.allSatisfy { values[$0] == item.detected($0) } && mainChoice == Self.automaticMain)
+            .disabled(InfoField.allCases.allSatisfy { values[$0] == item.detected($0) } && mainChoice == .automatic)
             Spacer()
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
@@ -379,7 +394,7 @@ struct InfoWindow: View {
             }
             if value != item.detected(field) { edits[field.rawValue] = value }
         }
-        if mainChoice != Self.automaticMain { edits["mainPackage"] = mainChoice }
+        if let main = mainChoice.stored { edits["mainPackage"] = main }
         store.saveInfo(item.id, edits: edits, notes: notes)
         dismiss()
     }
@@ -400,30 +415,5 @@ private struct FormSection<Content: View>: View {
             Divider()
             content
         }
-    }
-}
-
-/// The Info window's Main package menu: automatic, none, or any package.
-private struct MainPackageMenu: View, Equatable {
-    @ObservedObject var store: LibraryStore
-    let item: LibraryItem
-    @Binding var choice: String
-    let automatic: String
-
-    static func == (a: Self, b: Self) -> Bool {
-        a.item.id == b.item.id && a.choice == b.choice
-    }
-
-    var body: some View {
-        let foundMain = store.foundRelations.main[item.id].flatMap { store.item($0) }
-        Picker("", selection: $choice) {
-            Text("Automatic (\(foundMain.map { $0.title } ?? "none found"))").tag(automatic)
-            Text("None: it stands alone").tag("")
-            Divider()
-            ForEach(store.itemsByTitle.filter { $0.id != item.id }) { other in
-                Text(other.title).tag(other.sha256)
-            }
-        }
-        .labelsHidden()
     }
 }

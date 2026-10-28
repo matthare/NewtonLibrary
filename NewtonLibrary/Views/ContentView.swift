@@ -89,6 +89,12 @@ struct ContentView: View {
                 .frame(minWidth: 520)
             DetailPane(store: store, selection: store.selection, onRemove: askToRemove)
                 .frame(minWidth: 300, idealWidth: 340)
+                // (here: the window and the list each have a sheet already)
+                .sheet(item: $store.mainPackageChooser) { request in
+                    MainPackageChooser(store: store, packages: store.items.filter { request.ids.contains($0.id) }) {
+                        store.setMainPackage(of: request.ids, to: $0)
+                    }
+                }
         }
         .navigationTitle(store.title(for: store.filter))
         .searchable(text: $store.search, placement: .toolbar, prompt: "Search")
@@ -273,6 +279,7 @@ struct ContentView: View {
 /// While several files are being added: how far it's got, and a Cancel button.
 struct AddProgressSheet: View {
     @ObservedObject var store: LibraryStore
+    @AppStorage(IconBackground.key) private var iconBackground = IconBackground.standard
 
     var body: some View {
         let progress = store.addProgress ?? AddProgress()
@@ -284,6 +291,7 @@ struct AddProgressSheet: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             ProgressView(value: Double(min(progress.done, progress.total)), total: Double(max(progress.total, 1)))
+                .progressViewStyle(TileColoredBar(color: IconBackground.color(from: iconBackground)))
             HStack {
                 Text(progress.total > 0 ? "\(progress.done) of \(progress.total)" : " ")
                     .foregroundColor(.secondary)
@@ -297,5 +305,23 @@ struct AddProgressSheet: View {
         .padding(20)
         .frame(width: 420)
         .interactiveDismissDisabled()
+    }
+}
+
+/// A progress bar in the colour behind Newton icons (a tint alone comes out
+/// darker than the icons' tiles).
+private struct TileColoredBar: ProgressViewStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.1))
+                Capsule()
+                    .fill(color)
+                    .frame(width: geometry.size.width * min(max(configuration.fractionCompleted ?? 0, 0), 1))
+            }
+        }
+        .frame(height: 6)
     }
 }

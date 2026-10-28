@@ -257,8 +257,11 @@ version gets its own folder; with AlarmPak 1.4.2 and 2.0b9, each manual goes
 with its own AlarmPak. Of two applications that name each other and are
 equally linked (PocketMoney and ExCHANGE), the bigger is the main one.
 
-To change a link, use **Main package** in Get Info: Automatic (what was
-found), None (it stands alone), or any other package in the library.
+To change a link, select one or more packages and choose **File > Set Main
+Package…** (⇧⌘M, or the button in the details pane): Automatic (what was
+found), None (they stand alone), or any other package in the library, found
+by typing part of its name. Get Info's **Main package** row opens the same
+chooser.
 
 ## The version number
 

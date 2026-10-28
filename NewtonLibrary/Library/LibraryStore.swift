@@ -34,6 +34,8 @@ final class LibraryStore: ObservableObject {
     }
     /// The package whose Info window is open, if any.
     @Published var infoWindow: InfoRequest?
+    /// The packages whose main package is being chosen (Set Main Package…), if any.
+    @Published var mainPackageChooser: MainPackageRequest?
     @Published private(set) var databaseError: String?
 
     private var db: LibraryDatabase?
@@ -132,16 +134,22 @@ final class LibraryStore: ObservableObject {
         }
         derived.sorted = Visible(filter: filter, search: "", order: order, items: sorted)
         var shown = sorted
-        if !search.isEmpty {
-            // (each package's text is folded once, then kept until the library changes)
-            if derived.searchText == nil {
-                derived.searchText = Dictionary(items.map { ($0.id, $0.searchText) }, uniquingKeysWith: { a, _ in a })
-            }
-            let texts = derived.searchText!, wanted = LibraryItem.folded(search)
-            shown = sorted.filter { texts[$0.id]?.range(of: wanted, options: .literal) != nil }
-        }
+        if !search.isEmpty { shown = Self.filter(sorted, searchTexts, search) }
         derived.visible = Visible(filter: filter, search: search, order: order, items: shown)
         return shown
+    }
+
+    /// Each package's text for searching (folded once, then kept until the library changes).
+    private var searchTexts: [Int64: String] {
+        if let texts = derived.searchText { return texts }
+        let texts = Dictionary(items.map { ($0.id, $0.searchText) }, uniquingKeysWith: { a, _ in a })
+        derived.searchText = texts
+        return texts
+    }
+
+    private static func filter(_ items: [LibraryItem], _ texts: [Int64: String], _ search: String) -> [LibraryItem] {
+        let wanted = LibraryItem.folded(search)
+        return items.filter { texts[$0.id]?.range(of: wanted, options: .literal) != nil }
     }
 
     private struct Visible {
@@ -304,6 +312,16 @@ final class LibraryStore: ObservableObject {
         return sorted
     }
 
+    /// The packages a search finds (searched as the list is), sorted by title.
+    func itemsByTitle(matching search: String) -> [LibraryItem] {
+        search.isEmpty ? itemsByTitle : Self.filter(itemsByTitle, searchTexts, search)
+    }
+
+    /// The package with a SHA-256 (the first, if the library has it twice).
+    func item(withSHA256 sha: String) -> LibraryItem? {
+        items.first { $0.sha256 == sha }
+    }
+
     /// Selects a package in the list, showing all packages if it's filtered out.
     func select(_ id: Int64) {
         guard let item = item(id) else { return }
@@ -413,8 +431,8 @@ final class LibraryStore: ObservableObject {
 
     /// Adds package files (or every package in the given folders): reads each one,
     /// copies it into the library folder and adds it to the database.
-    /// Adding several at once (dropped together, or chosen together) shows a
-    /// progress sheet, whose Cancel button stops it.
+    /// Adding several at once (dropped together, or chosen together, or a folder
+    /// or an archive of them) shows a progress sheet, whose Cancel button stops it.
     func add(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
         // Files dropped while an add is going on are added after it
@@ -426,7 +444,11 @@ final class LibraryStore: ObservableObject {
         // (A package whose file is missing can be added again: its new copy takes
         // the missing one's place)
         let known = Set(items.filter { !$0.isMissing }.map(\.sha256))
-        let showsProgress = urls.count > 1
+        // (anything but a single file that isn't an archive)
+        let showsProgress = urls.count > 1 || urls.contains { url in
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                || Archives.format(of: url) != nil
+        }
         let control = Importer.Control { [weak self] done, total, current in
             guard let self, self.addProgress != nil else { return }
             self.addProgress?.done = done
@@ -573,6 +595,17 @@ final class LibraryStore: ObservableObject {
     // MARK: Changing and removing
 
     /// Opens the Info window for the selected package (Get Info, ⌘I).
+    /// Opens Set Main Package… for the selected packages.
+    func chooseMainPackage() {
+        if !selection.isEmpty { mainPackageChooser = MainPackageRequest(ids: selection) }
+    }
+
+    /// Sets the main package of packages (see MainPackageChoice), then files
+    /// them with it.
+    func setMainPackage(of ids: Set<Int64>, to choice: MainPackageChoice) {
+        updateAll(ids) { $0.mainPackageChoice = choice.stored }
+    }
+
     func showInfo() {
         if selection.count == 1, let id = selection.first { infoWindow = InfoRequest(id: id) }
     }

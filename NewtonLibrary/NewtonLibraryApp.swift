@@ -38,6 +38,9 @@ struct NewtonLibraryApp: App {
                 Button("Get Info", action: store.showInfo)
                     .keyboardShortcut("i")
                     .disabled(store.selection.count != 1 || store.infoWindow != nil)
+                Button("Set Main Package…", action: store.chooseMainPackage)
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                    .disabled(store.selection.isEmpty || store.infoWindow != nil || store.mainPackageChooser != nil)
             }
             CommandMenu("Library") {
                 Button("Show Library Folder in Finder", action: store.revealLibraryFolder)

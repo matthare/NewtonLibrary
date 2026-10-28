@@ -34,6 +34,13 @@ enum DebugSnapshot {
                 }
             }
         }
+        // -DebugAddFolder <folder> adds that folder, as if it had been dropped by itself
+        if let folder = UserDefaults.standard.string(forKey: "DebugAddFolder") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                NSApp.activate(ignoringOtherApps: true)
+                LibraryStore.shared.add([URL(fileURLWithPath: folder)])
+            }
+        }
         // -DebugSelect <title> selects that package
         if let title = UserDefaults.standard.string(forKey: "DebugSelect") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -167,6 +174,31 @@ enum DebugSnapshot {
                     guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
                     host.cacheDisplay(in: host.bounds, to: rep)
                     try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+                }
+            }
+        }
+        // -DebugMainPackage "<title>|<title>…" selects those packages and opens Set Main
+        // Package… for them; -DebugMainSearch <text> is then typed in its search field, and
+        // -DebugMainReturn YES presses Return
+        if let titles = UserDefaults.standard.string(forKey: "DebugMainPackage") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                let wanted = Set(titles.components(separatedBy: "|"))
+                let store = LibraryStore.shared
+                store.selection = Set(store.items.filter { wanted.contains($0.title) }.map(\.id))
+                store.chooseMainPackage()
+            }
+            if UserDefaults.standard.bool(forKey: "DebugMainReturn") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
+                    guard let sheet = NSApp.windows.first(where: { $0.isVisible })?.attachedSheet else { return }
+                    NSApp.activate(ignoringOtherApps: true)
+                    sheet.makeKey()
+                    for type in [NSEvent.EventType.keyDown, .keyUp] {
+                        if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                                                    windowNumber: sheet.windowNumber, context: nil, characters: "\r",
+                                                    charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36) {
+                            NSApp.postEvent(e, atStart: false)
+                        }
+                    }
                 }
             }
         }

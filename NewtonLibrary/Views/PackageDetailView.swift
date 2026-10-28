@@ -247,6 +247,9 @@ struct MultipleSelectionView: View {
                 Text("Leave the developer empty to go back to what was read from each package.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                Button("Set Main Package…") { store.mainPackageChooser = MainPackageRequest(ids: Set(items.map(\.id))) }
+                    .help("Choose the package these are add-ons for (⇧⌘M)")
+                    .padding(.top, 4)
             }
             HStack {
                 Button("Show in Finder") { store.reveal(Set(items.map(\.id))) }
@@ -322,44 +325,48 @@ struct RelatedPackagesView: View {
         let main = store.mainPackage(of: item)
         let addOns = store.addOns(of: item)
         let needs = store.relations.needs[item.id] ?? []
-        if main != nil || !addOns.isEmpty || !needs.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Related Packages")
-                    .font(.headline)
-                Divider()
-                if let main = main {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(store.relations.probable.contains(item.id) ? "Probably goes with" : "Add-on for")
-                            .foregroundColor(.secondary)
-                        PackageLink(store: store, item: main)
-                    }
-                }
-                if !addOns.isEmpty {
-                    Text(addOns.count == 1 ? "Add-on:" : "Add-ons (\(addOns.count)):")
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Related Packages")
+                .font(.headline)
+            Divider()
+            if let main = main {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(store.relations.probable.contains(item.id) ? "Probably goes with" : "Add-on for")
                         .foregroundColor(.secondary)
-                    ForEach(addOns) { addOn in
-                        HStack(spacing: 6) {
-                            PackageLink(store: store, item: addOn)
-                            if store.relations.probable.contains(addOn.id) {
-                                Text("(probably)")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.leading, 12)
-                    }
-                }
-                ForEach(needs, id: \.self) { name in
-                    Label("Needs \(name), which isn't in your library", systemImage: "exclamationmark.circle")
-                        .foregroundColor(.orange)
-                }
-                if item.mainPackageChoice != nil {
-                    Text("Set by you in Get Info.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    PackageLink(store: store, item: main)
                 }
             }
-            .font(.callout)
+            if !addOns.isEmpty {
+                Text(addOns.count == 1 ? "Add-on:" : "Add-ons (\(addOns.count)):")
+                    .foregroundColor(.secondary)
+                ForEach(addOns) { addOn in
+                    HStack(spacing: 6) {
+                        PackageLink(store: store, item: addOn)
+                        if store.relations.probable.contains(addOn.id) {
+                            Text("(probably)")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.leading, 12)
+                }
+            }
+            ForEach(needs, id: \.self) { name in
+                Label("Needs \(name), which isn't in your library", systemImage: "exclamationmark.circle")
+                    .foregroundColor(.orange)
+            }
+            if main == nil && addOns.isEmpty && needs.isEmpty {
+                Text(item.mainPackageChoice == "" ? "Stands alone (set by you)." : "No related packages found.")
+                    .foregroundColor(.secondary)
+            } else if item.mainPackageChoice != nil {
+                Text("Main package set by you.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Button("Set Main Package…") { store.mainPackageChooser = MainPackageRequest(ids: [item.id]) }
+                .help("Choose the package this one is an add-on for (⇧⌘M)")
+                .padding(.top, 2)
         }
+        .font(.callout)
     }
 }
 

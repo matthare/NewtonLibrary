@@ -21,6 +21,7 @@
 		B10000000000000000000017 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* SidebarView.swift */; };
 		B10000000000000000000019 /* PackageTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* PackageTable.swift */; };
 		B1000000000000000000001B /* PackageDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001A /* PackageDetailView.swift */; };
+		B10000000000000000000051 /* MainPackageChooser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000050 /* MainPackageChooser.swift */; };
 		B1000000000000000000001D /* PackageIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001C /* PackageIcon.swift */; };
 		B1000000000000000000001F /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001E /* PreferencesView.swift */; };
 		B10000000000000000000021 /* InfoWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* InfoWindow.swift */; };
@@ -45,6 +46,7 @@
 		B10000000000000000000016 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		B10000000000000000000018 /* PackageTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackageTable.swift; sourceTree = "<group>"; };
 		B1000000000000000000001A /* PackageDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackageDetailView.swift; sourceTree = "<group>"; };
+		B10000000000000000000050 /* MainPackageChooser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainPackageChooser.swift; sourceTree = "<group>"; };
 		B1000000000000000000001C /* PackageIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackageIcon.swift; sourceTree = "<group>"; };
 		B1000000000000000000001E /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
 		B10000000000000000000020 /* InfoWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfoWindow.swift; sourceTree = "<group>"; };
@@ -121,6 +123,7 @@
 				B10000000000000000000016 /* SidebarView.swift */,
 				B10000000000000000000018 /* PackageTable.swift */,
 				B1000000000000000000001A /* PackageDetailView.swift */,
+				B10000000000000000000050 /* MainPackageChooser.swift */,
 				B1000000000000000000001C /* PackageIcon.swift */,
 				B1000000000000000000001E /* PreferencesView.swift */,
 				B10000000000000000000020 /* InfoWindow.swift */,
@@ -212,6 +215,7 @@
 				B10000000000000000000017 /* SidebarView.swift in Sources */,
 				B10000000000000000000019 /* PackageTable.swift in Sources */,
 				B1000000000000000000001B /* PackageDetailView.swift in Sources */,
+				B10000000000000000000051 /* MainPackageChooser.swift in Sources */,
 				B1000000000000000000001D /* PackageIcon.swift in Sources */,
 				B1000000000000000000001F /* PreferencesView.swift in Sources */,
 				B10000000000000000000021 /* InfoWindow.swift in Sources */,
